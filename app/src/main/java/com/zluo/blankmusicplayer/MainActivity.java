@@ -317,8 +317,6 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
             if (currentVolume != maxVolume) {
                 volumeInLog = 1 - (float) (Math.log(maxVolume - currentVolume) / Math.log(maxVolume));
                 currentSong.setVolume(volumeInLog, volumeInLog);
-                Log.d("volummenow", "" + volumeInLog);
-                //Toast.makeText(this,"Adjusting volume",Toast.LENGTH_SHORT).show();
             } else {
                 currentSong.setVolume(1,1);
             }
