@@ -18,5 +18,5 @@
         android:layout_centerHorizontal="true"
         android:gravity="center"
         android:id="@+id/textClock"
-        android:format24Hour="h:mm"/>
+        android:format24Hour="h:mm" />
 </RelativeLayout>

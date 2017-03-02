@@ -12,7 +12,6 @@ import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
-import android.widget.RelativeLayout;
 import android.widget.TextClock;
 import android.widget.Toast;
 
@@ -46,6 +45,9 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
     private View myLayout;
     private int colorIndex = 0;
     private String[] colorArray;
+    private int maxVolume = 48;
+    private int currentVolume;
+    private float volumeInLog;
     
 
     @Override
@@ -98,6 +100,10 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         colorArray = new String[]{"#FAFAFA","#F5F5F5","#EEEEEE","#E0E0E0","#BDBDBD"
                 ,"#9E9E9E","#757575","#616161","#424242","#212121"};
 
+        //setting starting volume
+        currentVolume = 36;
+        volumeInLog = 1 - (float)(Math.log(maxVolume - currentVolume)/Math.log(maxVolume));
+
 
 
     }
@@ -106,6 +112,7 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         super.onStart();
 
         currentSong = new MediaPlayer();
+        currentSong.setVolume(volumeInLog,volumeInLog);
         //nextSong = new MediaPlayer();
         currentSongFile = songQueue.poll();
 
@@ -253,7 +260,10 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         }
         nextSong.setOnPreparedListener(MainActivity.this);
         nextSong.setOnCompletionListener(MainActivity.this);
+        nextSong.setVolume(volumeInLog,volumeInLog);
     }
+
+
 
 
 
@@ -281,7 +291,6 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
     @Override
     public boolean onScroll(MotionEvent motionEvent, MotionEvent motionEvent1, float v, float v1) {
         //up and down to adjust volume
-        //also right and left to switch songs
         //if happened on top of screen -- adjust screen color to black or white
         if (motionEvent.getY() < screenHeight*0.3 && motionEvent1.getY() <screenHeight*0.3) {
             //adjust the brightness
@@ -295,12 +304,27 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
                 colorIndex -= 1;
                 myLayout.setBackgroundColor(Color.parseColor(colorArray[colorIndex]));
             }
+            clock.setTextColor(Color.parseColor(colorArray[9-colorIndex]));
         } else if (Math.abs(v1) > Math.abs(v)) {
-            //adjust volume
-            Toast.makeText(this,"Adjusting volume",Toast.LENGTH_SHORT).show();
+            if (v1 > 0) {
+                //volume up
+                if (currentVolume < maxVolume) {
+                    currentVolume += 1;
+                }
+            } else if (currentVolume > 0) {
+                currentVolume -=1;
+            }
+            if (currentVolume != maxVolume) {
+                volumeInLog = 1 - (float) (Math.log(maxVolume - currentVolume) / Math.log(maxVolume));
+                currentSong.setVolume(volumeInLog, volumeInLog);
+                Log.d("volummenow", "" + volumeInLog);
+                //Toast.makeText(this,"Adjusting volume",Toast.LENGTH_SHORT).show();
+            } else {
+                currentSong.setVolume(1,1);
+            }
+            nextSong.setVolume(volumeInLog,volumeInLog);
         }
-        //actually shouldn't put this here it will skip too many songs just let onfling work
-        //next or last song
+        //actually shouldn't put nextsongprevioussong here it will skip too many songs just let onfling work
         return true;
     }
 
