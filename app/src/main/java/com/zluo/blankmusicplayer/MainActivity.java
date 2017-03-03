@@ -1,5 +1,6 @@
 package com.zluo.blankmusicplayer;
 
+import android.content.pm.ActivityInfo;
 import android.content.res.Resources;
 import android.graphics.Color;
 import android.media.MediaPlayer;
@@ -34,7 +35,7 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
     private MediaPlayer currentSong;
     private MediaPlayer nextSong;
     private List<File> tempMusicList;
-    private File[] kgMusicFiles;
+    private File[] allMusicFiles;
     private int musicFilesLength;
     private File currentSongFile;
     private File nextSongFile;
@@ -48,11 +49,13 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
     private int maxVolume = 48;
     private int currentVolume;
     private float volumeInLog;
-    
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        //setting rotation to portrait. doesnt make sense to be landscape anyways
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         setContentView(R.layout.activity_main);
 
         gestureDetectorCompat = new GestureDetectorCompat(this,this);
@@ -61,25 +64,18 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         songQueue = new LinkedList<>();
         playedSongs = new Stack<>();
 
-        tempMusicList = new ArrayList<>();
-        kgMusicFiles = getMusicFiles();
-        for (File file : kgMusicFiles) {
-            if (file.getAbsolutePath().endsWith(".mp3") ||
-                    file.getAbsolutePath().endsWith(".flac")) {
-                tempMusicList.add(file);
-            }
-        }
+        tempMusicList = getMusicFiles(Environment.getExternalStorageDirectory().getAbsolutePath());
         musicFilesLength = tempMusicList.size();
-        kgMusicFiles = new File[musicFilesLength];
-        kgMusicFiles = tempMusicList.toArray(kgMusicFiles);
+        allMusicFiles = new File[musicFilesLength];
+        allMusicFiles = tempMusicList.toArray(allMusicFiles);
 
         //adding 10 song files to queue
         for (int i = 0; i < 5; i++) {
-            songQueue.offer(kgMusicFiles[rand.nextInt(musicFilesLength)]);
+            songQueue.offer(allMusicFiles[rand.nextInt(musicFilesLength)]);
         }
         //adding 5 songs to stack in case user wants to prevent empty stack error
         for (int i = 0; i < 20; i++) {
-            playedSongs.push(kgMusicFiles[rand.nextInt(musicFilesLength)]);
+            playedSongs.push(allMusicFiles[rand.nextInt(musicFilesLength)]);
         }
 
         screenWidth = this.getResources().getDisplayMetrics().widthPixels;
@@ -103,8 +99,6 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         //setting starting volume
         currentVolume = 36;
         volumeInLog = 1 - (float)(Math.log(maxVolume - currentVolume)/Math.log(maxVolume));
-
-
 
     }
     @Override
@@ -171,8 +165,6 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         songQueue = null;
     }
 
-
-
     //Setting methods for music player
     @Override
     public void onPrepared(MediaPlayer mediaPlayer) {
@@ -198,7 +190,7 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
             //now nextsong is null. can't release and reset because currentSong points to the same
             nextSong = null;
             //adding a new song file onto the queue
-            songQueue.offer(kgMusicFiles[rand.nextInt(musicFilesLength)]);
+            songQueue.offer(allMusicFiles[rand.nextInt(musicFilesLength)]);
 
             //get next song
             prepareNextSong();
@@ -219,7 +211,7 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
 
         prepareNextSong();
 
-        songQueue.offer(kgMusicFiles[rand.nextInt(musicFilesLength)]);
+        songQueue.offer(allMusicFiles[rand.nextInt(musicFilesLength)]);
 
     }
 
@@ -377,9 +369,20 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         return super.onTouchEvent(event);
     }
 
-    public File[] getMusicFiles() {
-        File allStorageDir = new File(Environment.getExternalStorageDirectory().getAbsoluteFile(),"kgmusic");
-        File downloadedMusicDir = new File(allStorageDir, "download");
-        return downloadedMusicDir.listFiles();
+    //recursively get all the mp3 files
+    public ArrayList<File> getMusicFiles(String pathName) {
+        ArrayList<File> allTheMusicFiles = new ArrayList<>();
+        File allStorageDir = new File(pathName);
+        File[] fileArray = allStorageDir.listFiles();
+        if (fileArray.length != 0) {
+            for (File file : fileArray) {
+                if (file.isDirectory()) {
+                    allTheMusicFiles.addAll(getMusicFiles(file.getAbsolutePath()));
+                } else if (file.getAbsolutePath().endsWith(".mp3") || file.getAbsolutePath().endsWith(".flac")) {
+                    allTheMusicFiles.add(file);
+                }
+            }
+        }
+        return allTheMusicFiles;
     }
 }
