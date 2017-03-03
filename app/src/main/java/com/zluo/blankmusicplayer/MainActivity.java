@@ -1,10 +1,13 @@
 package com.zluo.blankmusicplayer;
 
+import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.res.Resources;
 import android.graphics.Color;
 import android.media.MediaPlayer;
 import android.os.Environment;
+import android.speech.RecognitionListener;
+import android.speech.RecognizerIntent;
 import android.support.v4.view.GestureDetectorCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
@@ -15,6 +18,7 @@ import android.view.View;
 import android.view.WindowManager;
 import android.widget.TextClock;
 import android.widget.Toast;
+import android.speech.SpeechRecognizer;
 
 import java.io.File;
 import java.io.IOException;
@@ -27,14 +31,13 @@ import java.util.Stack;
 
 public class MainActivity extends AppCompatActivity implements GestureDetector.OnGestureListener ,
         GestureDetector.OnDoubleTapListener, MediaPlayer.OnPreparedListener,
-        MediaPlayer.OnCompletionListener {
+        MediaPlayer.OnCompletionListener, RecognitionListener{
     private GestureDetectorCompat gestureDetectorCompat;
     private Deque<File> songQueue;
     private Stack<File> playedSongs;
     private Random rand = new Random();
     private MediaPlayer currentSong;
     private MediaPlayer nextSong;
-    private List<File> tempMusicList;
     private File[] allMusicFiles;
     private int musicFilesLength;
     private File currentSongFile;
@@ -49,7 +52,9 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
     private int maxVolume = 48;
     private int currentVolume;
     private float volumeInLog;
-
+    private SpeechRecognizer speechRecognizer;
+    private Intent speechIntent;
+    private boolean hideClock = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -64,16 +69,16 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         songQueue = new LinkedList<>();
         playedSongs = new Stack<>();
 
-        tempMusicList = getMusicFiles(Environment.getExternalStorageDirectory().getAbsolutePath());
+        List<File> tempMusicList = getMusicFiles(Environment.getExternalStorageDirectory().getAbsolutePath());
         musicFilesLength = tempMusicList.size();
         allMusicFiles = new File[musicFilesLength];
         allMusicFiles = tempMusicList.toArray(allMusicFiles);
 
-        //adding 10 song files to queue
+        //adding 5 song files to queue
         for (int i = 0; i < 5; i++) {
             songQueue.offer(allMusicFiles[rand.nextInt(musicFilesLength)]);
         }
-        //adding 5 songs to stack in case user wants to prevent empty stack error
+        //adding 20 songs to stack in case user wants to prevent empty stack error
         for (int i = 0; i < 20; i++) {
             playedSongs.push(allMusicFiles[rand.nextInt(musicFilesLength)]);
         }
@@ -86,7 +91,7 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
 
         //setting clock and its color(White by default)
         clock = (TextClock)findViewById(R.id.textClock);
-        clock.setTextColor(Color.WHITE);
+        clock.setTextColor(Color.BLACK);
         clock.setTextSize(screenWidth*0.1f);
 
         //setting my layout to the current one
@@ -99,6 +104,15 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         //setting starting volume
         currentVolume = 36;
         volumeInLog = 1 - (float)(Math.log(maxVolume - currentVolume)/Math.log(maxVolume));
+
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
+        speechRecognizer.setRecognitionListener(this);
+        speechIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        speechIntent.putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE,"en-US");
+        speechIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,1);
+        speechIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS,500);
+        speechIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS,Long.valueOf(3600000));
+
 
     }
     @Override
@@ -144,6 +158,7 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         super.onPause();
 
         currentSong.pause();
+
     }
 
     @Override
@@ -163,6 +178,60 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         super.onDestroy();
         playedSongs = null;
         songQueue = null;
+        speechRecognizer.destroy();
+    }
+
+
+    //speech Recognition implementation
+
+    @Override
+    public void onReadyForSpeech(Bundle bundle) {
+
+    }
+
+    @Override
+    public void onBeginningOfSpeech() {
+
+    }
+
+    @Override
+    public void onRmsChanged(float v) {
+
+    }
+
+    @Override
+    public void onBufferReceived(byte[] bytes) {
+
+    }
+
+    @Override
+    public void onEndOfSpeech() {
+
+    }
+
+    @Override
+    public void onError(int i) {
+
+    }
+
+    @Override
+    public void onResults(Bundle bundle) {
+        if (bundle != null && bundle.containsKey(SpeechRecognizer.RESULTS_RECOGNITION)) {
+            List<String> results = bundle.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+            if (results.size() != 0 && results.get(0).toLowerCase().equals("start")) {
+                currentSong.start();
+            }
+        }
+    }
+
+    @Override
+    public void onPartialResults(Bundle bundle) {
+
+    }
+
+    @Override
+    public void onEvent(int i, Bundle bundle) {
+
     }
 
     //Setting methods for music player
@@ -256,10 +325,6 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
     }
 
 
-
-
-
-
     //Setting methods for touch events
     @Override
     public boolean onDown(MotionEvent motionEvent) {
@@ -296,7 +361,12 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
                 colorIndex -= 1;
                 myLayout.setBackgroundColor(Color.parseColor(colorArray[colorIndex]));
             }
-            clock.setTextColor(Color.parseColor(colorArray[9-colorIndex]));
+            if (hideClock) {
+                clock.setTextColor(Color.parseColor(colorArray[colorIndex]));
+            } else {
+                clock.setTextColor(Color.parseColor(colorArray[9 - colorIndex]));
+            }
+
         } else if (Math.abs(v1) > Math.abs(v)) {
             if (v1 > 0) {
                 //volume up
@@ -320,7 +390,8 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
 
     @Override
     public void onLongPress(MotionEvent motionEvent) {
-
+        hideClock = !hideClock;
+        clock.setTextColor(Color.parseColor(colorArray[hideClock ? colorIndex : 9 - colorIndex]));
     }
 
     @Override
@@ -345,6 +416,7 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
     public boolean onSingleTapConfirmed(MotionEvent motionEvent) {
         if (currentSong.isPlaying()) {
             currentSong.pause();
+            //speechRecognizer.startListening(speechIntent);
         } else {
             currentSong.start();
         }
@@ -371,10 +443,11 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
 
     //recursively get all the mp3 files
     public ArrayList<File> getMusicFiles(String pathName) {
+        Log.d("lookedFiles",pathName);
         ArrayList<File> allTheMusicFiles = new ArrayList<>();
         File allStorageDir = new File(pathName);
         File[] fileArray = allStorageDir.listFiles();
-        if (fileArray.length != 0) {
+        if (fileArray != null && fileArray.length != 0) {
             for (File file : fileArray) {
                 if (file.isDirectory()) {
                     allTheMusicFiles.addAll(getMusicFiles(file.getAbsolutePath()));
