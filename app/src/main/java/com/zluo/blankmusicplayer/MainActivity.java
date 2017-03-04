@@ -1,13 +1,17 @@
 package com.zluo.blankmusicplayer;
 
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.res.Resources;
 import android.graphics.Color;
+import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.os.Environment;
+import android.os.Handler;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
+import android.speech.RecognizerResultsIntent;
 import android.support.v4.view.GestureDetectorCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
@@ -28,6 +32,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Random;
 import java.util.Stack;
+import java.util.concurrent.TimeUnit;
 
 public class MainActivity extends AppCompatActivity implements GestureDetector.OnGestureListener ,
         GestureDetector.OnDoubleTapListener, MediaPlayer.OnPreparedListener,
@@ -55,6 +60,9 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
     private SpeechRecognizer speechRecognizer;
     private Intent speechIntent;
     private boolean hideClock = false;
+    private AudioManager audioManager;
+    private int streamVolumeMusic;
+    private int streamVolumeSystem;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -105,15 +113,16 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         currentVolume = 36;
         volumeInLog = 1 - (float)(Math.log(maxVolume - currentVolume)/Math.log(maxVolume));
 
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
-        speechRecognizer.setRecognitionListener(this);
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(MainActivity.this);
+        //speechRecognizer.setRecognitionListener(MainActivity.this);
         speechIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         speechIntent.putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE,"en-US");
         speechIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,1);
         speechIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS,500);
-        speechIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS,Long.valueOf(3600000));
+        speechIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS,Long.valueOf(3600000l));
+        //speechIntent.putExtra("android.speech.extra.DICTATION_MODE",true);
 
-
+        audioManager = (AudioManager)getSystemService(Context.AUDIO_SERVICE);
     }
     @Override
     protected void onStart() {
@@ -158,6 +167,8 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         super.onPause();
 
         currentSong.pause();
+        //audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, streamVolumeSystem, AudioManager.FLAG_PLAY_SOUND);
+        //audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, streamVolumeMusic, AudioManager.FLAG_PLAY_SOUND);
 
     }
 
@@ -171,7 +182,11 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
             nextSong.release();
             nextSong = null;
         }
+        //audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, streamVolumeSystem, AudioManager.FLAG_PLAY_SOUND);
+        //audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, streamVolumeMusic, AudioManager.FLAG_PLAY_SOUND);
+        speechRecognizer.destroy();
     }
+
 
     @Override
     protected void onDestroy() {
@@ -186,12 +201,12 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
 
     @Override
     public void onReadyForSpeech(Bundle bundle) {
-
+        Log.d("readyforspeech","Im ready for speech");
     }
 
     @Override
     public void onBeginningOfSpeech() {
-
+        Log.d("beginningofspeech","Im beginning of speech");
     }
 
     @Override
@@ -206,12 +221,23 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
 
     @Override
     public void onEndOfSpeech() {
-
+        Log.d("endofspeech","Im at end of speech");
     }
 
     @Override
     public void onError(int i) {
 
+       if (i == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                //|| i == SpeechRecognizer.ERROR_AUDIO) {
+            Log.d("iminonerror", "listening from onerror");
+
+           //Worked when you destroy the speechrecognizer and reinstantiate it again
+           speechRecognizer.destroy();
+           speechRecognizer = SpeechRecognizer.createSpeechRecognizer(MainActivity.this);
+           speechRecognizer.setRecognitionListener(MainActivity.this);
+
+           speechRecognizer.startListening(speechIntent);
+        }
     }
 
     @Override
@@ -219,9 +245,43 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         if (bundle != null && bundle.containsKey(SpeechRecognizer.RESULTS_RECOGNITION)) {
             List<String> results = bundle.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
             if (results.size() != 0 && results.get(0).toLowerCase().equals("start")) {
+                //audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, streamVolumeSystem, AudioManager.FLAG_PLAY_SOUND);
+                //audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, streamVolumeMusic, AudioManager.FLAG_PLAY_SOUND);
+                /*try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }*/
                 currentSong.start();
+                return;
             }
+
         }
+        Log.d("amicalled","i am called before start listening in onresults!");
+        //listen();
+        speechRecognizer.cancel();
+        speechRecognizer.setRecognitionListener(this);
+        speechRecognizer.startListening(speechIntent);
+        Log.d("listeningfromonresults","im listening from on results");
+    }
+
+    private void listen() {
+        /*if (speechRecognizer == null) {
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
+            speechRecognizer.setRecognitionListener(this);
+        }
+        speechIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        speechIntent.putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE,"en-US");
+        speechIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,1);
+        speechIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS,500);
+        speechIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS,Long.valueOf(3600000));
+        */
+        speechRecognizer.destroy();
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(MainActivity.this);
+        speechRecognizer.setRecognitionListener(MainActivity.this);
+
+        speechRecognizer.startListening(speechIntent);
+        Log.d("imcalledlisten","Im called in listen()");
     }
 
     @Override
@@ -416,8 +476,23 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
     public boolean onSingleTapConfirmed(MotionEvent motionEvent) {
         if (currentSong.isPlaying()) {
             currentSong.pause();
-            //speechRecognizer.startListening(speechIntent);
+            streamVolumeMusic = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
+            streamVolumeSystem = audioManager.getStreamVolume(AudioManager.STREAM_SYSTEM);
+            //audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM,AudioManager.ADJUST_MUTE,AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
+            //audioManager.setStreamVolume(AudioManager.STREAM_MUSIC,AudioManager.ADJUST_MUTE,AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
+            speechRecognizer.setRecognitionListener(this);
+            speechRecognizer.startListening(speechIntent);
+            Log.d("listeningfromsingletap","im listening from singletap");
         } else {
+            speechRecognizer.stopListening();
+            speechRecognizer.cancel();
+            //audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM,streamVolumeSystem,AudioManager.FLAG_PLAY_SOUND);
+            //audioManager.setStreamVolume(AudioManager.STREAM_MUSIC,streamVolumeMusic,AudioManager.FLAG_PLAY_SOUND);
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
             currentSong.start();
         }
         return true;
