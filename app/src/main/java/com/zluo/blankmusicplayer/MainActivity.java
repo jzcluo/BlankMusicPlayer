@@ -2,16 +2,15 @@ package com.zluo.blankmusicplayer;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.res.Resources;
 import android.graphics.Color;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.os.Environment;
-import android.os.Handler;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
-import android.speech.RecognizerResultsIntent;
 import android.support.v4.view.GestureDetectorCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
@@ -32,11 +31,12 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Random;
 import java.util.Stack;
-import java.util.concurrent.TimeUnit;
+
 
 public class MainActivity extends AppCompatActivity implements GestureDetector.OnGestureListener ,
         GestureDetector.OnDoubleTapListener, MediaPlayer.OnPreparedListener,
-        MediaPlayer.OnCompletionListener, RecognitionListener{
+        MediaPlayer.OnCompletionListener, MediaPlayer.OnSeekCompleteListener,
+        RecognitionListener{
     private GestureDetectorCompat gestureDetectorCompat;
     private Deque<File> songQueue;
     private Stack<File> playedSongs;
@@ -52,7 +52,7 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
     private int screenHeight;
     private TextClock clock;
     private View myLayout;
-    private int colorIndex = 0;
+    private int colorIndex;
     private String[] colorArray;
     private int maxVolume = 48;
     private int currentVolume;
@@ -63,6 +63,18 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
     private AudioManager audioManager;
     private int streamVolumeMusic;
     private int streamVolumeSystem;
+    private boolean allowVoiceControl = false;
+    private boolean volumeMutedByThisApp = false;
+    private int currentPosition;
+    private final String PREFERENCE_FILE_KEY = "com.zluo.BlankMusicPlayer.PREFERENCE_FILE_KEY";
+    private final String PLAYBACK_POSITION = "PLAYBACK_POSITION";
+    private final String SONG_FILE = "SONG_FILE";
+    private final String COLOR_INDEX = "COLOR_INDEX";
+    private final String CLOCK_COLOR = "CLOCK_COLOR";
+    private final String ON_VOICE_CONTROL = "ON_VOICE_CONTROL";
+    private final String CURRENT_VOLUME = "CURRENT_VOLUME";
+    private SharedPreferences sharedPreferences;
+    private SharedPreferences.Editor editor;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -77,16 +89,31 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         songQueue = new LinkedList<>();
         playedSongs = new Stack<>();
 
+
+        List<File> tempMusicList = new ArrayList<>();
+        allMusicFiles = getMusicFiles();
+        for (File file : allMusicFiles) {
+            if (file.getAbsolutePath().endsWith(".mp3") ||
+                    file.getAbsolutePath().endsWith(".flac")) {
+                tempMusicList.add(file);
+            }
+        }
+        musicFilesLength = tempMusicList.size();
+        allMusicFiles = new File[musicFilesLength];
+        allMusicFiles = tempMusicList.toArray(allMusicFiles);
+
+        /*
         List<File> tempMusicList = getMusicFiles(Environment.getExternalStorageDirectory().getAbsolutePath());
         musicFilesLength = tempMusicList.size();
         allMusicFiles = new File[musicFilesLength];
         allMusicFiles = tempMusicList.toArray(allMusicFiles);
+        */
 
         //adding 5 song files to queue
         for (int i = 0; i < 5; i++) {
             songQueue.offer(allMusicFiles[rand.nextInt(musicFilesLength)]);
         }
-        //adding 20 songs to stack in case user wants to prevent empty stack error
+        //adding 20 songs to stack in case user swipes left. prevent empty stack error
         for (int i = 0; i < 20; i++) {
             playedSongs.push(allMusicFiles[rand.nextInt(musicFilesLength)]);
         }
@@ -97,42 +124,52 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         //keep screen on
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
-        //setting clock and its color(White by default)
-        clock = (TextClock)findViewById(R.id.textClock);
-        clock.setTextColor(Color.BLACK);
-        clock.setTextSize(screenWidth*0.1f);
-
-        //setting my layout to the current one
-        myLayout = findViewById(R.id.activity_main);
-
         //create color array. have to hard code this for now as i do not know a solution
         colorArray = new String[]{"#FAFAFA","#F5F5F5","#EEEEEE","#E0E0E0","#BDBDBD"
                 ,"#9E9E9E","#757575","#616161","#424242","#212121"};
 
+        //saving data
+        sharedPreferences = this.getSharedPreferences(PREFERENCE_FILE_KEY,MODE_PRIVATE);
+        editor = sharedPreferences.edit();
+
+        //setting clock and its color(White by default)
+        clock = (TextClock)findViewById(R.id.textClock);
+        clock.setTextColor(Color.parseColor(colorArray[sharedPreferences.getInt(CLOCK_COLOR,9)]));
+        clock.setTextSize(screenWidth*0.1f);
+
+        colorIndex = sharedPreferences.getInt(COLOR_INDEX,0);
+        //setting my layout to the current one
+        myLayout = findViewById(R.id.activity_main);
+        myLayout.setBackgroundColor(Color.parseColor(colorArray[colorIndex]));
+
+        allowVoiceControl = sharedPreferences.getBoolean(ON_VOICE_CONTROL,false);
+
         //setting starting volume
-        currentVolume = 36;
+        currentVolume = sharedPreferences.getInt(CURRENT_VOLUME, 38);
         volumeInLog = 1 - (float)(Math.log(maxVolume - currentVolume)/Math.log(maxVolume));
 
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(MainActivity.this);
-        //speechRecognizer.setRecognitionListener(MainActivity.this);
+        //set up speech intent
         speechIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         speechIntent.putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE,"en-US");
         speechIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,1);
         speechIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS,500);
-        speechIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS,Long.valueOf(3600000l));
-        //speechIntent.putExtra("android.speech.extra.DICTATION_MODE",true);
+
 
         audioManager = (AudioManager)getSystemService(Context.AUDIO_SERVICE);
+
     }
     @Override
     protected void onStart() {
         super.onStart();
-
+        Log.d("onstart","on start called" + currentPosition);
         currentSong = new MediaPlayer();
         currentSong.setVolume(volumeInLog,volumeInLog);
         //nextSong = new MediaPlayer();
-        currentSongFile = songQueue.poll();
 
+        //getting data from sharedPreference. clearing data right after;
+        currentSongFile = new File(sharedPreferences.getString(SONG_FILE,songQueue.poll().getAbsolutePath()));
+        currentPosition = sharedPreferences.getInt(PLAYBACK_POSITION,0);
+        editor.clear().apply();
         try {
             currentSong.setDataSource(currentSongFile.getAbsolutePath());
         } catch (IOException e) {
@@ -140,24 +177,32 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         }
         currentSong.setOnPreparedListener(MainActivity.this);
         currentSong.setOnCompletionListener(MainActivity.this);
+        currentSong.setOnSeekCompleteListener(MainActivity.this);
 
-        currentSong.prepareAsync();
+
+        try {
+            currentSong.prepare();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-
+        Log.d("onresume","on resume called");
+        //putting this line here because can use seek to
         currentSong.start();
-        currentSong.setOnCompletionListener(MainActivity.this);
-
+        //onResume is always called with onStart therefore no need to start
+        //currentSong.start();
+        //currentSong.setOnCompletionListener(MainActivity.this);
         prepareNextSong();
     }
-
 
     @Override
     protected void onRestart() {
         super.onRestart();
+        Log.d("onrestart","on restart called");
     }
 
 
@@ -165,26 +210,42 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
     @Override
     protected void onPause() {
         super.onPause();
-
+        Log.d("onpause","on pause called");
+        //saving data
+        SharedPreferences.Editor editor = sharedPreferences.edit();
         currentSong.pause();
-        //audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, streamVolumeSystem, AudioManager.FLAG_PLAY_SOUND);
-        //audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, streamVolumeMusic, AudioManager.FLAG_PLAY_SOUND);
+        editor.putInt(PLAYBACK_POSITION, currentSong.getCurrentPosition());
+        editor.putString(SONG_FILE, currentSongFile.getAbsolutePath());
+        editor.putInt(COLOR_INDEX, colorIndex);
+        editor.putInt(CLOCK_COLOR, hideClock ? colorIndex : 9 - colorIndex);
+        editor.putBoolean(ON_VOICE_CONTROL, allowVoiceControl);
+        editor.putInt(CURRENT_VOLUME, currentVolume);
+        editor.apply();
+
+        if (volumeMutedByThisApp) {
+            audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, streamVolumeSystem, AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, streamVolumeMusic, AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
+            speechRecognizer.destroy();
+        }
 
     }
 
     @Override
     protected void onStop() {
         super.onStop();
-
+        Log.d("onstop","on stop called" + currentPosition);
+        //currentPosition = currentSong.getCurrentPosition();
         currentSong.release();
         currentSong = null;
         if (nextSong != null) {
             nextSong.release();
             nextSong = null;
         }
-        //audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, streamVolumeSystem, AudioManager.FLAG_PLAY_SOUND);
-        //audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, streamVolumeMusic, AudioManager.FLAG_PLAY_SOUND);
-        speechRecognizer.destroy();
+        if (volumeMutedByThisApp) {
+            audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, streamVolumeSystem, AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, streamVolumeMusic, AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
+            speechRecognizer.destroy();
+        }
     }
 
 
@@ -193,7 +254,9 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         super.onDestroy();
         playedSongs = null;
         songQueue = null;
-        speechRecognizer.destroy();
+        if (speechRecognizer != null) {
+            speechRecognizer.destroy();
+        }
     }
 
 
@@ -226,62 +289,39 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
 
     @Override
     public void onError(int i) {
+        speechRecognizer.destroy();
+        if (!currentSong.isPlaying()){
 
-       if (i == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
-                //|| i == SpeechRecognizer.ERROR_AUDIO) {
-            Log.d("iminonerror", "listening from onerror");
-
-           //Worked when you destroy the speechrecognizer and reinstantiate it again
-           speechRecognizer.destroy();
-           speechRecognizer = SpeechRecognizer.createSpeechRecognizer(MainActivity.this);
-           speechRecognizer.setRecognitionListener(MainActivity.this);
-
-           speechRecognizer.startListening(speechIntent);
+            //Worked when you destroy the speechrecognizer and reinstantiate it again
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(MainActivity.this);
+            speechRecognizer.setRecognitionListener(MainActivity.this);
+            speechRecognizer.startListening(speechIntent);
+            Log.d("onerrorcalled", "Im called in on error");
         }
     }
 
     @Override
     public void onResults(Bundle bundle) {
-        if (bundle != null && bundle.containsKey(SpeechRecognizer.RESULTS_RECOGNITION)) {
-            List<String> results = bundle.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-            if (results.size() != 0 && results.get(0).toLowerCase().equals("start")) {
-                //audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, streamVolumeSystem, AudioManager.FLAG_PLAY_SOUND);
-                //audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, streamVolumeMusic, AudioManager.FLAG_PLAY_SOUND);
-                /*try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }*/
-                currentSong.start();
-                return;
-            }
-
-        }
-        Log.d("amicalled","i am called before start listening in onresults!");
-        //listen();
-        speechRecognizer.cancel();
-        speechRecognizer.setRecognitionListener(this);
-        speechRecognizer.startListening(speechIntent);
-        Log.d("listeningfromonresults","im listening from on results");
-    }
-
-    private void listen() {
-        /*if (speechRecognizer == null) {
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
-            speechRecognizer.setRecognitionListener(this);
-        }
-        speechIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-        speechIntent.putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE,"en-US");
-        speechIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,1);
-        speechIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS,500);
-        speechIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS,Long.valueOf(3600000));
-        */
         speechRecognizer.destroy();
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(MainActivity.this);
-        speechRecognizer.setRecognitionListener(MainActivity.this);
-
-        speechRecognizer.startListening(speechIntent);
-        Log.d("imcalledlisten","Im called in listen()");
+        if (!currentSong.isPlaying()) {
+            if (bundle != null && bundle.containsKey(SpeechRecognizer.RESULTS_RECOGNITION)) {
+                List<String> results = bundle.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                if (results.size() != 0 && results.get(0).toLowerCase().equals("start")) {
+                    //speechRecognizer.destroy();
+                    currentSong.start();
+                    audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, streamVolumeSystem, AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
+                    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, streamVolumeMusic, AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
+                    return;
+                }
+            }
+            Log.d("amicalled", "i am called before start listening in onresults!");
+            //cancel gives a vibrate where destroy doesnt
+            //speechRecognizer.destroy();
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(MainActivity.this);
+            speechRecognizer.setRecognitionListener(MainActivity.this);
+            speechRecognizer.startListening(speechIntent);
+            Log.d("listeningfromonresults", "im listening from on results");
+        }
     }
 
     @Override
@@ -297,6 +337,22 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
     //Setting methods for music player
     @Override
     public void onPrepared(MediaPlayer mediaPlayer) {
+        if (currentPosition != 0) {
+            mediaPlayer.setOnSeekCompleteListener(new MediaPlayer.OnSeekCompleteListener() {
+                @Override
+                public void onSeekComplete(MediaPlayer mediaPlayer) {
+                    mediaPlayer.start();
+                }
+            });
+            mediaPlayer.seekTo(currentPosition);
+            currentPosition = 0;
+        } else {
+            mediaPlayer.start();
+        }
+    }
+
+    @Override
+    public void onSeekComplete(MediaPlayer mediaPlayer) {
         mediaPlayer.start();
     }
 
@@ -450,8 +506,14 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
 
     @Override
     public void onLongPress(MotionEvent motionEvent) {
-        hideClock = !hideClock;
-        clock.setTextColor(Color.parseColor(colorArray[hideClock ? colorIndex : 9 - colorIndex]));
+        if (motionEvent.getY() < screenHeight*0.3) {
+            hideClock = !hideClock;
+            clock.setTextColor(Color.parseColor(colorArray[hideClock ? colorIndex : 9 - colorIndex]));
+        } else {
+            allowVoiceControl = !allowVoiceControl;
+            Toast.makeText(MainActivity.this, "Voice control "
+                    + (allowVoiceControl ? "en" : "dis") + "abled", Toast.LENGTH_SHORT).show();
+        }
     }
 
     @Override
@@ -461,10 +523,10 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         if (motionEvent.getY() > screenHeight*0.3 && motionEvent1.getY() > screenHeight*0.3) {
             if (Math.abs(v) > Math.abs(v1)) {
                 if (v < 0) {
-                    Toast.makeText(this, "OnFling next song", Toast.LENGTH_SHORT).show();
+                    //Toast.makeText(this, "OnFling next song", Toast.LENGTH_SHORT).show();
                     playNextSong();
                 } else if (!playedSongs.isEmpty()) {
-                    Toast.makeText(this, "OnFling previous song", Toast.LENGTH_SHORT).show();
+                    //Toast.makeText(this, "OnFling previous song", Toast.LENGTH_SHORT).show();
                     playPreviousSong();
                 }
             }
@@ -478,20 +540,22 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
             currentSong.pause();
             streamVolumeMusic = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
             streamVolumeSystem = audioManager.getStreamVolume(AudioManager.STREAM_SYSTEM);
-            //audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM,AudioManager.ADJUST_MUTE,AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
-            //audioManager.setStreamVolume(AudioManager.STREAM_MUSIC,AudioManager.ADJUST_MUTE,AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
-            speechRecognizer.setRecognitionListener(this);
-            speechRecognizer.startListening(speechIntent);
-            Log.d("listeningfromsingletap","im listening from singletap");
+            if (allowVoiceControl) {
+                audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_MUTE, AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
+                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
+
+                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(MainActivity.this);
+                speechRecognizer.setRecognitionListener(MainActivity.this);
+                speechRecognizer.startListening(speechIntent);
+                Log.d("listeningfromsingletap", "im listening from singletap");
+                volumeMutedByThisApp = true;
+            }
         } else {
-            speechRecognizer.stopListening();
-            speechRecognizer.cancel();
-            //audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM,streamVolumeSystem,AudioManager.FLAG_PLAY_SOUND);
-            //audioManager.setStreamVolume(AudioManager.STREAM_MUSIC,streamVolumeMusic,AudioManager.FLAG_PLAY_SOUND);
-            try {
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
+            if (allowVoiceControl) {
+                //calling destroy in this method causes the phone to vibrate(no idea why)
+                speechRecognizer.stopListening();
+                audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, streamVolumeSystem, AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
+                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, streamVolumeMusic, AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
             }
             currentSong.start();
         }
@@ -516,6 +580,12 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         return super.onTouchEvent(event);
     }
 
+
+    public File[] getMusicFiles() {
+        File allStorageDir = new File(Environment.getExternalStorageDirectory().getAbsoluteFile(),"kgmusic");
+        File downloadedMusicDir = new File(allStorageDir, "download");
+        return downloadedMusicDir.listFiles();
+    }
     //recursively get all the mp3 files
     public ArrayList<File> getMusicFiles(String pathName) {
         Log.d("lookedFiles",pathName);
