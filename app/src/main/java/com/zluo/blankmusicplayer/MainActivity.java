@@ -43,6 +43,7 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
     private Random rand = new Random();
     private MediaPlayer currentSong;
     private MediaPlayer nextSong;
+    private List<File> tempMusicList;
     private File[] allMusicFiles;
     private int musicFilesLength;
     private File currentSongFile;
@@ -73,8 +74,11 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
     private final String CLOCK_COLOR = "CLOCK_COLOR";
     private final String ON_VOICE_CONTROL = "ON_VOICE_CONTROL";
     private final String CURRENT_VOLUME = "CURRENT_VOLUME";
+    private final String FILES_STRING = "FILES_STRING";
+    private String stringOfFiles;
     private SharedPreferences sharedPreferences;
     private SharedPreferences.Editor editor;
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -89,25 +93,28 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         songQueue = new LinkedList<>();
         playedSongs = new Stack<>();
 
+        //saving data
+        sharedPreferences = this.getSharedPreferences(PREFERENCE_FILE_KEY,MODE_PRIVATE);
+        editor = sharedPreferences.edit();
 
-        List<File> tempMusicList = new ArrayList<>();
-        allMusicFiles = getMusicFiles();
-        for (File file : allMusicFiles) {
-            if (file.getAbsolutePath().endsWith(".mp3") ||
-                    file.getAbsolutePath().endsWith(".flac")) {
-                tempMusicList.add(file);
+        stringOfFiles = sharedPreferences.getString(FILES_STRING, "");
+
+        if (stringOfFiles.length() == 0) {
+            tempMusicList = getMusicFiles(Environment.getExternalStorageDirectory().getAbsolutePath());
+            musicFilesLength = tempMusicList.size();
+            allMusicFiles = new File[musicFilesLength];
+            allMusicFiles = tempMusicList.toArray(allMusicFiles);
+            editor.putString(FILES_STRING, musicFilesToString(allMusicFiles));
+            editor.apply();
+        } else {
+            String[] stringFilesArray = stringOfFiles.split("\\s+");
+            musicFilesLength = stringFilesArray.length;
+            Log.d("filelength"," "+musicFilesLength);
+            allMusicFiles = new File[musicFilesLength];
+            for (int i = 0; i < musicFilesLength; i++) {
+                allMusicFiles[i] = new File(stringFilesArray[i]);
             }
         }
-        musicFilesLength = tempMusicList.size();
-        allMusicFiles = new File[musicFilesLength];
-        allMusicFiles = tempMusicList.toArray(allMusicFiles);
-
-        /*
-        List<File> tempMusicList = getMusicFiles(Environment.getExternalStorageDirectory().getAbsolutePath());
-        musicFilesLength = tempMusicList.size();
-        allMusicFiles = new File[musicFilesLength];
-        allMusicFiles = tempMusicList.toArray(allMusicFiles);
-        */
 
         //adding 5 song files to queue
         for (int i = 0; i < 5; i++) {
@@ -116,6 +123,7 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         //adding 20 songs to stack in case user swipes left. prevent empty stack error
         for (int i = 0; i < 20; i++) {
             playedSongs.push(allMusicFiles[rand.nextInt(musicFilesLength)]);
+            Log.d("push","push in oncreate");
         }
 
         screenWidth = this.getResources().getDisplayMetrics().widthPixels;
@@ -128,9 +136,7 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         colorArray = new String[]{"#FAFAFA","#F5F5F5","#EEEEEE","#E0E0E0","#BDBDBD"
                 ,"#9E9E9E","#757575","#616161","#424242","#212121"};
 
-        //saving data
-        sharedPreferences = this.getSharedPreferences(PREFERENCE_FILE_KEY,MODE_PRIVATE);
-        editor = sharedPreferences.edit();
+
 
         //setting clock and its color(White by default)
         clock = (TextClock)findViewById(R.id.textClock);
@@ -169,7 +175,7 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         //getting data from sharedPreference. clearing data right after;
         currentSongFile = new File(sharedPreferences.getString(SONG_FILE,songQueue.poll().getAbsolutePath()));
         currentPosition = sharedPreferences.getInt(PLAYBACK_POSITION,0);
-        editor.clear().apply();
+        editor.remove(PLAYBACK_POSITION).apply();
         try {
             currentSong.setDataSource(currentSongFile.getAbsolutePath());
         } catch (IOException e) {
@@ -180,11 +186,7 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         currentSong.setOnSeekCompleteListener(MainActivity.this);
 
 
-        try {
-            currentSong.prepare();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+        //currentSong.prepareAsync();
     }
 
     @Override
@@ -192,10 +194,12 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         super.onResume();
         Log.d("onresume","on resume called");
         //putting this line here because can use seek to
-        currentSong.start();
+        currentSong.prepareAsync();
         //onResume is always called with onStart therefore no need to start
         //currentSong.start();
         //currentSong.setOnCompletionListener(MainActivity.this);
+        Log.d("queuelength"," "+songQueue.size());
+        Log.d("stacklength"," "+playedSongs.size());
         prepareNextSong();
     }
 
@@ -212,15 +216,8 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         super.onPause();
         Log.d("onpause","on pause called");
         //saving data
-        SharedPreferences.Editor editor = sharedPreferences.edit();
-        currentSong.pause();
-        editor.putInt(PLAYBACK_POSITION, currentSong.getCurrentPosition());
-        editor.putString(SONG_FILE, currentSongFile.getAbsolutePath());
-        editor.putInt(COLOR_INDEX, colorIndex);
-        editor.putInt(CLOCK_COLOR, hideClock ? colorIndex : 9 - colorIndex);
-        editor.putBoolean(ON_VOICE_CONTROL, allowVoiceControl);
-        editor.putInt(CURRENT_VOLUME, currentVolume);
-        editor.apply();
+        //editor = sharedPreferences.edit();
+        currentSong.stop();
 
         if (volumeMutedByThisApp) {
             audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, streamVolumeSystem, AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
@@ -235,28 +232,52 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         super.onStop();
         Log.d("onstop","on stop called" + currentPosition);
         //currentPosition = currentSong.getCurrentPosition();
+        if (volumeMutedByThisApp) {
+            audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, streamVolumeSystem, AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, streamVolumeMusic, AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
+            speechRecognizer.destroy();
+        }
+        editor.putInt(PLAYBACK_POSITION, currentSong.getCurrentPosition());
+        editor.putString(SONG_FILE, currentSongFile.getAbsolutePath());
+        editor.putInt(COLOR_INDEX, colorIndex);
+        editor.putInt(CLOCK_COLOR, hideClock ? colorIndex : 9 - colorIndex);
+        editor.putBoolean(ON_VOICE_CONTROL, allowVoiceControl);
+        editor.putInt(CURRENT_VOLUME, currentVolume);
+        editor.apply();
         currentSong.release();
         currentSong = null;
         if (nextSong != null) {
             nextSong.release();
             nextSong = null;
         }
-        if (volumeMutedByThisApp) {
-            audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, streamVolumeSystem, AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
-            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, streamVolumeMusic, AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
+        //need to add two songs to songQueue because two songs are wasted here.Otherwise null pointer
+        //oncompletion and play next song would have added two
+        songQueue.offer(allMusicFiles[rand.nextInt(musicFilesLength)]);
+        songQueue.offer(allMusicFiles[rand.nextInt(musicFilesLength)]);
+
+        if (speechRecognizer != null) {
             speechRecognizer.destroy();
         }
     }
-
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
         playedSongs = null;
         songQueue = null;
-        if (speechRecognizer != null) {
-            speechRecognizer.destroy();
-        }
+/*
+        Log.d("ondestroy","on destroy called");
+        editor.remove(PLAYBACK_POSITION);
+        editor.remove(SONG_FILE);
+        tempMusicList = getMusicFiles(Environment.getExternalStorageDirectory().getAbsolutePath());
+        musicFilesLength = tempMusicList.size();
+        allMusicFiles = new File[musicFilesLength];
+        allMusicFiles = tempMusicList.toArray(allMusicFiles);
+        stringOfFiles = musicFilesToString(allMusicFiles);
+        editor.putString(FILES_STRING, stringOfFiles);
+        editor.apply();
+        Log.d("ondestroy","on destroy called");
+        */
     }
 
 
@@ -367,10 +388,13 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
 
             //Push currentsong to the played stack and setting current the next song that'll play
             playedSongs.push(currentSongFile);
+            Log.d("push","push in oncompleion");
             currentSongFile = nextSongFile;
 
             //Releasing current song and setting it to the next song
             currentSong.release();
+            currentSong = null;
+
             currentSong = nextSong;
             //now nextsong is null. can't release and reset because currentSong points to the same
             nextSong = null;
@@ -384,10 +408,16 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
 
     //self-defined methods for playing last or next song
     public void playNextSong() {
+        Log.d("length","play next song");
+        Log.d("stacklength"," "+playedSongs.size());
+
         //push this song to the played song stack and getting next song to this song
         playedSongs.push(currentSongFile);
+        Log.d("push","push in playnextsong");
         currentSongFile = nextSongFile;
         currentSong.release();
+        currentSong = null;
+
         currentSong = nextSong;
         //already set on prepared listener
         currentSong.prepareAsync();
@@ -401,6 +431,9 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
     }
 
     private void playPreviousSong() {
+        Log.d("length","play previous song");
+        Log.d("length"," "+songQueue.size());
+
         songQueue.offerFirst(nextSongFile);
         songQueue.offerFirst(currentSongFile);
 
@@ -416,6 +449,7 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
             Log.d("errorplayprevioussong","Error is in play previous song");
             e.printStackTrace();
         }
+        //currentSong.setOnCompletionListener(MainActivity.this);
         currentSong.setOnPreparedListener(MainActivity.this);
         currentSong.prepareAsync();
 
@@ -510,6 +544,17 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
             hideClock = !hideClock;
             clock.setTextColor(Color.parseColor(colorArray[hideClock ? colorIndex : 9 - colorIndex]));
         } else {
+            if (allowVoiceControl) {
+                try {
+                    speechRecognizer.destroy();
+                } catch (NullPointerException e) {
+
+                }
+                if (volumeMutedByThisApp) {
+                    audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, streamVolumeSystem, AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
+                    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, streamVolumeMusic, AudioManager.FLAG_REMOVE_SOUND_AND_VIBRATE);
+                }
+            }
             allowVoiceControl = !allowVoiceControl;
             Toast.makeText(MainActivity.this, "Voice control "
                     + (allowVoiceControl ? "en" : "dis") + "abled", Toast.LENGTH_SHORT).show();
@@ -580,14 +625,8 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         return super.onTouchEvent(event);
     }
 
-
-    public File[] getMusicFiles() {
-        File allStorageDir = new File(Environment.getExternalStorageDirectory().getAbsoluteFile(),"kgmusic");
-        File downloadedMusicDir = new File(allStorageDir, "download");
-        return downloadedMusicDir.listFiles();
-    }
     //recursively get all the mp3 files
-    public ArrayList<File> getMusicFiles(String pathName) {
+    private ArrayList<File> getMusicFiles(String pathName) {
         Log.d("lookedFiles",pathName);
         ArrayList<File> allTheMusicFiles = new ArrayList<>();
         File allStorageDir = new File(pathName);
@@ -602,5 +641,14 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
             }
         }
         return allTheMusicFiles;
+    }
+
+    private String musicFilesToString(File[] filesArray) {
+        StringBuilder builder = new StringBuilder();
+        for (File file : filesArray) {
+            builder.append(file.getAbsolutePath()).append(" ");
+        }
+        //builder.setLength(builder.length() - 1);
+        return builder.toString();
     }
 }
