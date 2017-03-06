@@ -75,6 +75,7 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
     private final String ON_VOICE_CONTROL = "ON_VOICE_CONTROL";
     private final String CURRENT_VOLUME = "CURRENT_VOLUME";
     private final String FILES_STRING = "FILES_STRING";
+    private final String DEFAULT_EMPTY_STRING = " ";
     private String stringOfFiles;
     private SharedPreferences sharedPreferences;
     private SharedPreferences.Editor editor;
@@ -97,9 +98,9 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         sharedPreferences = this.getSharedPreferences(PREFERENCE_FILE_KEY,MODE_PRIVATE);
         editor = sharedPreferences.edit();
 
-        stringOfFiles = sharedPreferences.getString(FILES_STRING, "");
+        stringOfFiles = sharedPreferences.getString(FILES_STRING, DEFAULT_EMPTY_STRING);
 
-        if (stringOfFiles.length() == 0) {
+        if (stringOfFiles.equals(DEFAULT_EMPTY_STRING)) {
             tempMusicList = getMusicFiles(Environment.getExternalStorageDirectory().getAbsolutePath());
             musicFilesLength = tempMusicList.size();
             allMusicFiles = new File[musicFilesLength];
@@ -107,12 +108,12 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
             editor.putString(FILES_STRING, musicFilesToString(allMusicFiles));
             editor.apply();
         } else {
-            String[] stringFilesArray = stringOfFiles.split("\\s+");
+            String[] stringFilesArray = stringOfFiles.split("@");
             musicFilesLength = stringFilesArray.length;
             Log.d("filelength"," "+musicFilesLength);
             allMusicFiles = new File[musicFilesLength];
             for (int i = 0; i < musicFilesLength; i++) {
-                allMusicFiles[i] = new File(stringFilesArray[i]);
+                allMusicFiles[i] = new File(stringFilesArray[i].trim());
             }
         }
 
@@ -123,7 +124,6 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         //adding 20 songs to stack in case user swipes left. prevent empty stack error
         for (int i = 0; i < 20; i++) {
             playedSongs.push(allMusicFiles[rand.nextInt(musicFilesLength)]);
-            Log.d("push","push in oncreate");
         }
 
         screenWidth = this.getResources().getDisplayMetrics().widthPixels;
@@ -265,8 +265,7 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         super.onDestroy();
         playedSongs = null;
         songQueue = null;
-/*
-        Log.d("ondestroy","on destroy called");
+
         editor.remove(PLAYBACK_POSITION);
         editor.remove(SONG_FILE);
         tempMusicList = getMusicFiles(Environment.getExternalStorageDirectory().getAbsolutePath());
@@ -276,8 +275,6 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
         stringOfFiles = musicFilesToString(allMusicFiles);
         editor.putString(FILES_STRING, stringOfFiles);
         editor.apply();
-        Log.d("ondestroy","on destroy called");
-        */
     }
 
 
@@ -388,13 +385,10 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
 
             //Push currentsong to the played stack and setting current the next song that'll play
             playedSongs.push(currentSongFile);
-            Log.d("push","push in oncompleion");
             currentSongFile = nextSongFile;
 
             //Releasing current song and setting it to the next song
             currentSong.release();
-            currentSong = null;
-
             currentSong = nextSong;
             //now nextsong is null. can't release and reset because currentSong points to the same
             nextSong = null;
@@ -408,16 +402,10 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
 
     //self-defined methods for playing last or next song
     public void playNextSong() {
-        Log.d("length","play next song");
-        Log.d("stacklength"," "+playedSongs.size());
-
         //push this song to the played song stack and getting next song to this song
         playedSongs.push(currentSongFile);
-        Log.d("push","push in playnextsong");
         currentSongFile = nextSongFile;
         currentSong.release();
-        currentSong = null;
-
         currentSong = nextSong;
         //already set on prepared listener
         currentSong.prepareAsync();
@@ -431,9 +419,6 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
     }
 
     private void playPreviousSong() {
-        Log.d("length","play previous song");
-        Log.d("length"," "+songQueue.size());
-
         songQueue.offerFirst(nextSongFile);
         songQueue.offerFirst(currentSongFile);
 
@@ -449,7 +434,7 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
             Log.d("errorplayprevioussong","Error is in play previous song");
             e.printStackTrace();
         }
-        //currentSong.setOnCompletionListener(MainActivity.this);
+        currentSong.setOnCompletionListener(MainActivity.this);
         currentSong.setOnPreparedListener(MainActivity.this);
         currentSong.prepareAsync();
 
@@ -645,10 +630,10 @@ public class MainActivity extends AppCompatActivity implements GestureDetector.O
 
     private String musicFilesToString(File[] filesArray) {
         StringBuilder builder = new StringBuilder();
+
         for (File file : filesArray) {
-            builder.append(file.getAbsolutePath()).append(" ");
+            builder.append(file.getAbsolutePath()).append("@");
         }
-        //builder.setLength(builder.length() - 1);
         return builder.toString();
     }
 }
